@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Eagle Eyes</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .logo {
+            max-width: 150px;
+            height: auto;
+        }
+
+        .console {
+            background-color: #1e1e1e;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 12px;
+            border-radius: 4px;
+            width: 300px;
+            height: 150px;
+            overflow-y: auto;
+            font-size: 0.9em;
+        }
+
+        .console-line {
+            margin: 3px 0;
+            padding: 2px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .main-container {
+            display: flex;
+            gap: 20px;
+            height: calc(100vh - 220px);
+        }
+
+        .left-panel {
+            flex: 0 0 400px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .right-panel {
+            flex: 1;
+            background-color: #333;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.2em;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .control-panel {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .status {
+            margin-bottom: 20px;
+        }
+
+        .button {
+            margin: 5px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+
+        .button:hover {
+            background-color: #0056b3;
+        }
+
+        .movement {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+            width: 150px;
+            margin: 20px 0;
+        }
+
+        .movement button {
+            grid-column: auto;
+        }
+
+        .movement .up { grid-column: 2; }
+        .movement .down { grid-column: 2; }
+        .movement .left { grid-column: 1; grid-row: 2; }
+        .movement .right { grid-column: 3; grid-row: 2; }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: none;
+        }
+
+        .camera-placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="static/img/logo-eagleeyes.jpeg" alt="Eagle Eyes Drones Logo" class="logo">
+        <div class="console" id="actionConsole"></div>
+    </div>
+
+    <div class="main-container">
+        <div class="left-panel">
+            <div class="control-panel">
+                <div class="status">
+                    <h2>État du drone</h2>
+                    <p>Statut vol: <span id="flightStatus">-</span></p>
+                    <p>Statut caméra: <span id="cameraStatus">-</span></p>
+                    <p>Enregistrement: <span id="recordingStatus">-</span></p>
+                </div>
+
+                <div class="controls">
+                    <button onclick="sendCommand('Décollage')" class="button">Décollage/Atterrissage</button>
+                    <button onclick="toggleCamera()" class="button">Caméra On/Off</button>
+                    <button onclick="toggleRecording()" class="button">Enregistrement</button>
+                    
+                    <div class="movement">
+                        <button onclick="sendCommand('Monte')" class="button up">↑</button>
+                        <button onclick="sendCommand('Descend')" class="button down">↓</button>
+                        <button onclick="sendCommand('Gauche')" class="button left">←</button>
+                        <button onclick="sendCommand('Droite')" class="button right">→</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <video id="videoStream" autoplay playsinline></video>
+            <div class="camera-placeholder">Flux vidéo à venir</div>
+        </div>
+    </div>
+
+    <script>
+        let stream = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+        let isFlying = false;
+
+        async function toggleCamera() {
+            const video = document.getElementById('videoStream');
+            const placeholder = document.querySelector('.camera-placeholder');
+
+            if (!stream) {
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { 
+                            width: { ideal: 1280 },
+                            height: { ideal: 720 }
+                        }
+                    });
+                    video.srcObject = stream;
+                    video.style.display = 'block';
+                    placeholder.style.display = 'none';
+                    document.getElementById('cameraStatus').textContent = 'Allumée';
+                    logAction('Caméra allumée');
+                } catch (err) {
+                    console.error("Erreur d'accès à la caméra:", err);
+                    logAction('Erreur d\'accès à la caméra');
+                }
+            } else {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+                video.style.display = 'none';
+                placeholder.style.display = 'block';
+                document.getElementById('cameraStatus').textContent = 'Éteinte';
+                logAction('Caméra éteinte');
+
+                if (isRecording) {
+                    toggleRecording();
+                }
+            }
+        }
+
+        function toggleRecording() {
+            if (!stream) {
+                logAction('Impossible d\'enregistrer: la caméra est éteinte');
+                return;
+            }
+
+            if (!isRecording) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        }
+
+        function startRecording() {
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream);
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'drone-recording.webm';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+            };
+
+            mediaRecorder.start();
+            isRecording = true;
+            document.getElementById('recordingStatus').textContent = 'En cours';
+            logAction('Début de l\'enregistrement');
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            isRecording = false;
+            document.getElementById('recordingStatus').textContent = 'Arrêté';
+            logAction('Fin de l\'enregistrement');
+        }
+
+        function logAction(action) {
+            const console = document.getElementById('actionConsole');
+            const timestamp = new Date().toLocaleTimeString();
+            const newLine = document.createElement('div');
+            newLine.className = 'console-line';
+            newLine.textContent = `[${timestamp}] ${action}`;
+            console.insertBefore(newLine, console.firstChild);
+        }
+
+         function sendCommand(command) {
+            if (command === 'Décollage') {
+                isFlying = !isFlying;
+                const newStatus = isFlying ? 'En vol' : 'Au sol';
+                const actionMessage = isFlying ? 'Décollage' : 'Atterrissage';
+                
+                document.getElementById('flightStatus').textContent = newStatus;
+                logAction(`Commande envoyée: ${actionMessage}`);
+            } else {
+                logAction(`Commande envoyée: ${command}`);
+            }
+        }
+
+        document.getElementById('flightStatus').textContent = 'Au sol';
+        document.getElementById('cameraStatus').textContent = 'Éteinte';
+        document.getElementById('recordingStatus').textContent = 'Arrêté';
+    </script>
+</body>
+</html>
