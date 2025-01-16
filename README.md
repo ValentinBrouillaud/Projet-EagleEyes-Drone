@@ -24,7 +24,7 @@ Le projet EagleEyes Drone est une application de gestion et de contrôle de dron
 
 1. Clonez le dépôt:
     ```sh
-    git clone https://github.com/votre-utilisateur/projet-eagleeyes-drone.git
+    git clone https://github.com/ValentinBrouillaud/projet-eagleeyes-drone.git
     ```
 2. Accédez au répertoire du projet:
     ```sh
